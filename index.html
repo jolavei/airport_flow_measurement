@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Levantamiento Flujo - Diego Aracena</title>
+    <style>
+        :root { --primary: #2c3e50; --success: #27ae60; --danger: #e74c3c; --accent: #3498db; --warning: #f39c12; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 15px; color: #333; }
+        .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); max-width: 480px; margin: auto; }
+        .setup-box { background: #f8f9fa; border: 2px dashed #cbd5e0; border-radius: 10px; padding: 15px; margin-bottom: 20px; }
+        .timer-display { font-family: 'Courier New', monospace; font-size: 2.2rem; font-weight: bold; text-align: center; margin: 10px 0; color: var(--primary); }
+        .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+        .metric-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; }
+        .metric-box span { font-size: 0.75rem; text-transform: uppercase; color: #64748b; display: block; }
+        .metric-box strong { font-size: 1.4rem; color: var(--primary); }
+        .controls { display: flex; gap: 12px; margin-bottom: 15px; }
+        .btn { border: none; border-radius: 10px; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 1rem; }
+        .btn:disabled { background: #cbd5e0 !important; cursor: not-allowed; }
+        .btn-in { background: var(--success); flex: 1; padding: 25px 10px; }
+        .btn-out { background: var(--danger); flex: 1; padding: 25px 10px; }
+        .btn-action { width: 100%; padding: 15px; margin-top: 10px; }
+        .start { background: var(--accent); }
+        .stop { background: #6366f1; }
+        input[type="number"] { width: 60px; padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 1.1rem; text-align: center; }
+        #results { background: #1e293b; color: #f8fafc; padding: 15px; border-radius: 8px; margin-top: 15px; display: none; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div style="text-align:center; margin-bottom:15px;">
+        <h3 style="margin:0;">Control de Flujo Operativo</h3>
+        <small>Iquique - Diego Aracena</small>
+    </div>
+
+    <div id="setup-area" class="setup-box">
+        <label style="display:block; margin-bottom:10px; font-weight:bold;">Estado inicial de la fila:</label>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <input type="number" id="initialCountInput" value="0" min="0">
+            <span>pasajeros en espera actualmente</span>
+        </div>
+    </div>
+
+    <div class="timer-display" id="timer">00:00:00</div>
+
+    <div class="metrics-grid">
+        <div class="metric-box" style="border-bottom: 3px solid var(--warning);">
+            <span>En Fila</span>
+            <strong id="current-queue">0</strong>
+        </div>
+        <div class="metric-box">
+            <span>Entraron</span>
+            <strong id="total-in">0</strong>
+        </div>
+        <div class="metric-box">
+            <span>Salieron</span>
+            <strong id="total-out">0</strong>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="btnIn" class="btn btn-in" onclick="register('INGRESO')" disabled>📥<br>ENTRA</button>
+        <button id="btnOut" class="btn btn-out" onclick="register('SALIDA')" disabled>📤<br>SALE</button>
+    </div>
+
+    <button id="sessionBtn" class="btn btn-action start" onclick="toggleSession()">INICIAR MEDICIÓN</button>
+    
+    <div id="results">
+        <strong style="color:var(--accent);">Resumen del Levantamiento:</strong><br><br>
+        <span id="resultsData"></span>
+    </div>
+
+    <button id="downloadBtn" class="btn btn-action" style="background:#475569; display:none;" onclick="exportCSV()">DESCARGAR REPORTE (.CSV)</button>
+</div>
+
+<script>
+    let sessionActive = false;
+    let startTime, endTime;
+    let timerInterval;
+    let logs = [];
+    let initialCount = 0;
+    let countIn = 0;
+    let countOut = 0;
+
+    function toggleSession() {
+        const sBtn = document.getElementById('sessionBtn');
+        const setupArea = document.getElementById('setup-area');
+        
+        if (!sessionActive) {
+            // INICIO
+            initialCount = parseInt(document.getElementById('initialCountInput').value) || 0;
+            sessionActive = true;
+            startTime = new Date();
+            
+            // Registro inicial
+            logs.push({ 
+                timestamp: startTime.toLocaleTimeString(), 
+                event: "INICIO_SESION", 
+                queue: initialCount,
+                note: `Carga inicial: ${initialCount}` 
+            });
+
+            setupArea.style.opacity = "0.5";
+            document.getElementById('initialCountInput').disabled = true;
+            document.getElementById('current-queue').innerText = initialCount;
+            sBtn.innerText = "FINALIZAR MEDICIÓN";
+            sBtn.className = "btn btn-action stop";
+            document.getElementById('btnIn').disabled = false;
+            document.getElementById('btnOut').disabled = false;
+            startTimer();
+        } else {
+            // FIN
+            sessionActive = false;
+            endTime = new Date();
+            clearInterval(timerInterval);
+            sBtn.style.display = "none";
+            document.getElementById('btnIn').disabled = true;
+            document.getElementById('btnOut').disabled = true;
+            document.getElementById('downloadBtn').style.display = "block";
+            document.getElementById('results').style.display = "block";
+            processFinalMetrics();
+        }
+    }
+
+    function startTimer() {
+        timerInterval = setInterval(() => {
+            let diff = Date.now() - startTime;
+            let h = Math.floor(diff / 3600000).toString().padStart(2, '0');
+            let m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
+            let s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+            document.getElementById('timer').innerText = `${h}:${m}:${s}`;
+        }, 1000);
+    }
+
+    function register(type) {
+        if (type === 'INGRESO') countIn++;
+        if (type === 'SALIDA') {
+            if ((initialCount + countIn - countOut) <= 0) return alert("Fila vacía");
+            countOut++;
+        }
+
+        let currentQueue = initialCount + countIn - countOut;
+        document.getElementById('total-in').innerText = countIn;
+        document.getElementById('total-out').innerText = countOut;
+        document.getElementById('current-queue').innerText = currentQueue;
+
+        logs.push({
+            timestamp: new Date().toLocaleTimeString(),
+            event: type,
+            queue: currentQueue,
+            note: ""
+        });
+    }
+
+    function processFinalMetrics() {
+        let durationMin = (endTime - startTime) / 60000;
+        
+        // Tasa de llegada (Pax/min) considerando nuevos ingresos
+        let arrivalRate = countIn / durationMin;
+        
+        // Promedio de personas en fila (L)
+        let sumQueue = logs.reduce((acc, log) => acc + log.queue, 0);
+        let avgQueue = sumQueue / logs.length;
+
+        // Tiempo de espera estimado (W = L / lambda)
+        // Usamos (countIn + initialCount) / duration para una tasa de flujo total si prefieres,
+        // pero técnicamente la tasa de llegada del sistema hoy es countIn / tiempo.
+        let estimatedWait = arrivalRate > 0 ? (avgQueue / arrivalRate) : 0;
+
+        document.getElementById('resultsData').innerHTML = `
+            • Duración: ${durationMin.toFixed(2)} min<br>
+            • Carga Inicial: ${initialCount} pax<br>
+            • Tasa de Entrada: ${arrivalRate.toFixed(2)} pax/min<br>
+            • Promedio en Fila: ${avgQueue.toFixed(2)} pax<br><br>
+            <strong>TIEMPO PROM. EN FILA: ${estimatedWait.toFixed(2)} minutos</strong>
+        `;
+    }
+
+    function exportCSV() {
+        let csv = "Timestamp,Evento,Personas_en_Fila,Notas\n";
+        logs.forEach(l => {
+            csv += `${l.timestamp},${l.event},${l.queue},"${l.note}"\n`;
+        });
+        
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.setAttribute('href', url);
+        a.setAttribute('download', `Levantamiento_IQQ_${new Date().toISOString().slice(0,10)}.csv`);
+        a.click();
+    }
+</script>
+
+</body>
+</html>
